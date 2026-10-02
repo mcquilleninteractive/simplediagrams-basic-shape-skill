@@ -18,7 +18,7 @@ Standard values:
 |---|---|
 | ViewBox, shorter side | 64–100 units |
 | Stroke width | 1 |
-| Maximum normal displacement | 0.3 |
+| Maximum normal displacement | 0.25 |
 | Sample spacing | 3 |
 
 SimpleDiagrams draws lines at width 1 by default at any shape size, and places the SVG at one unit per point, so these values make the SVG look the way it imports. They are fixed, not proportional to the viewBox. Leave margin for the stroke, keep parts at least 2 units apart, and drop details that would clog at placed size.

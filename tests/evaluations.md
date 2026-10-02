@@ -20,7 +20,7 @@ Check: an SVG file is delivered; recognizable cactus; subtle waviness on contour
 
 "Make an isometric two-bay server with three side vents, in the same pencil style. Then make the waves half as strong and more frequent without changing the box's corners or angles."
 
-Check: axes at ±30°; equal vertical drops; shared faces reuse exact edge coordinates; vents follow the face axes; the revision halves displacement to about 0.15 and shortens the spacing, with corners and stroke width unchanged.
+Check: axes at ±30°; equal vertical drops; shared faces reuse exact edge coordinates; vents follow the face axes; the revision halves displacement to about 0.12 and shortens the spacing, with corners and stroke width unchanged.
 
 ## 3. Matching set and a true hole
 
