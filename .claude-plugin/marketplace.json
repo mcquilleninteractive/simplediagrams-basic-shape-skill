@@ -1,0 +1,14 @@
+{
+  "name": "simplediagrams",
+  "description": "Agent skills for SimpleDiagrams",
+  "owner": {
+    "name": "McQuillen Interactive Pty. Ltd."
+  },
+  "plugins": [
+    {
+      "name": "simplediagrams-basic-shape-skill",
+      "source": "./",
+      "description": "Draws hand-drawn SVG shapes for SimpleDiagrams, flat or isometric, marked up so Convert to Editable Shape gives fills and outlines that follow the diagram's colors."
+    }
+  ]
+}

@@ -10,7 +10,14 @@ Requires SimpleDiagrams for macOS 5.0.7 or later. In 5.0.7 a converted shape arr
 
 ## Install
 
-Keep the folder name `simplediagrams-basic-shape-skill`. If you download a ZIP from GitHub, remove the branch suffix from the folder name.
+In Claude Code, install it as a plugin, which also lets you pick up later versions with `claude plugin update`:
+
+```bash
+claude plugin marketplace add mcquilleninteractive/simplediagrams-basic-shape-skill
+claude plugin install simplediagrams-basic-shape-skill@simplediagrams
+```
+
+To install by copying instead, keep the folder name `simplediagrams-basic-shape-skill`. If you download a ZIP from GitHub, remove the branch suffix from the folder name.
 
 - Claude Code: copy the folder into `~/.claude/skills/`, or `.claude/skills/` inside a project.
 - Claude.ai: upload a zip of the folder, following Anthropic's [skill installation instructions](https://support.claude.com/en/articles/12512180-use-skills-in-claude).

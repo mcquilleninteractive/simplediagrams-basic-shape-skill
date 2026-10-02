@@ -1,0 +1,14 @@
+{
+  "name": "simplediagrams-basic-shape-skill",
+  "displayName": "SimpleDiagrams Hand-Drawn Shapes",
+  "version": "1.0.0",
+  "description": "Draws hand-drawn SVG shapes for SimpleDiagrams, flat or isometric, marked up so Convert to Editable Shape gives fills and outlines that follow the diagram's colors.",
+  "author": {
+    "name": "McQuillen Interactive Pty. Ltd.",
+    "url": "https://simplediagrams.com/"
+  },
+  "homepage": "https://simplediagrams.com/",
+  "repository": "https://github.com/mcquilleninteractive/simplediagrams-basic-shape-skill",
+  "license": "MIT",
+  "keywords": ["simplediagrams", "svg", "hand-drawn", "diagrams", "isometric", "shapes"]
+}
