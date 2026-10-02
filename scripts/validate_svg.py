@@ -62,12 +62,16 @@ PAINT_RE = re.compile(r"(?:none|black|white|#[0-9a-f]{3}|#[0-9a-f]{6})")
 # A resource or script scheme inside an attribute value. Matched on parsed
 # attributes, never on raw source, so prose in <title>/<desc> cannot trip it.
 ACTIVE_SCHEME_RE = re.compile(r"(?:^|[\s(,;'\"])(?:data|javascript)\s*:", re.IGNORECASE)
-NUMBER_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
-_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
-TRANSFORM_RE = re.compile(
-    rf"(?:\s*(?:matrix|translate|scale|rotate|skewX|skewY)\s*"
-    rf"\(\s*{_NUMBER}(?:[\s,]+{_NUMBER})*\s*\)[\s,]*)+"
-)
+# ASCII digits only: `\d` would also accept other scripts' digits, which SimpleDiagrams refuses.
+_NUMBER = r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?"
+NUMBER_RE = re.compile(rf"^{_NUMBER}$")
+MAX_TRANSFORM_BYTES = 4_096
+# One transform function. Its arguments are captured whole and counted afterwards, so
+# matching stays linear however much whitespace a file contains.
+TRANSFORM_FUNCTION_RE = re.compile(r"(matrix|translate|scale|rotate|skewX|skewY)[ \t\r\n]*\(([^()]*)\)")
+TRANSFORM_ARGUMENTS = {
+    "matrix": {6}, "translate": {1, 2}, "scale": {1, 2}, "rotate": {1, 3}, "skewX": {1}, "skewY": {1},
+}  # fmt: skip
 # SimpleDiagrams refuses a file whose source contains these, comments included.
 EXTERNAL_REFERENCE_RES = (
     re.compile(r"(?:href|src)\s*=\s*[\"']\s*(?:https?://|file:|data:)"),
@@ -75,9 +79,7 @@ EXTERNAL_REFERENCE_RES = (
 )
 # A prefixed tag such as <svg:path>: valid XML, but not compiled by SimpleDiagrams.
 PREFIXED_TAG_RE = re.compile(r"<\s*/?\s*[A-Za-z_][\w.-]*:[\w.-]+[\s/>]")
-LENGTH_RE = re.compile(
-    r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(?:px|pt|pc|mm|cm|in)?$"
-)
+LENGTH_RE = re.compile(rf"^({_NUMBER})(?:px|pt|pc|mm|cm|in)?$")
 
 
 @dataclass
@@ -128,6 +130,21 @@ def number_list(value: str) -> list[float] | None:
     return None if None in numbers else numbers  # type: ignore[return-value]
 
 
+def usable_transform(value: str) -> bool:
+    """Whether a transform is a list of known functions with the right number of finite arguments."""
+    if len(value.encode("utf-8")) > MAX_TRANSFORM_BYTES:
+        return False
+    functions = list(TRANSFORM_FUNCTION_RE.finditer(value))
+    # Nothing but separators may remain once the functions are taken out.
+    if not functions or TRANSFORM_FUNCTION_RE.sub("", value).strip(" \t\r\n,"):
+        return False
+    for function in functions:
+        arguments = number_list(function.group(2))
+        if arguments is None or len(arguments) not in TRANSFORM_ARGUMENTS[function.group(1)]:
+            return False
+    return True
+
+
 def value_problem(element: str, attribute: str, value: str) -> str | None:
     """Say what a geometry or stroke attribute must be, or None when it is usable.
 
@@ -142,9 +159,9 @@ def value_problem(element: str, attribute: str, value: str) -> str | None:
         usable = value.strip() == "none" or (dashes and all(dash >= 0 for dash in dashes))
         return None if usable else "must be none or a list of non-negative numbers"
     if attribute == "transform":
-        numbers = [finite_number(number) for number in re.findall(_NUMBER, value)]
-        usable = TRANSFORM_RE.fullmatch(value) and None not in numbers
-        return None if usable else "must be a list of matrix, translate, scale, rotate, skewX or skewY"
+        if usable_transform(value):
+            return None
+        return "must be a list of matrix, translate, scale, rotate, skewX or skewY with valid arguments"
     if attribute == "points":
         points = number_list(value)
         minimum = 6 if element == "polygon" else 4
@@ -220,7 +237,7 @@ def walk(
 ) -> None:
     """Validate one element and recursively validate its descendants."""
     name = local_name(element.tag)
-    if depth > MAX_DEPTH:
+    if depth >= MAX_DEPTH:
         report.error(f"nesting exceeds authoring limit of {MAX_DEPTH}; flatten groups")
         return
     if not element.tag.startswith(f"{{{SVG_NAMESPACE}}}"):

@@ -20,7 +20,7 @@ Never present output as legally cleared, and do not trace or adapt SimpleDiagram
 ## Workflow
 
 1. Settle the subject, view, placed size and details. Defaults: one shape per SVG, transparent background, white fills, black strokes of width 1, subtly wavy lines. Save where asked, otherwise in `output/`. Ask only when a missing choice changes the result materially.
-2. Build clean baseline geometry. For isometric work, fix the projection and shared edges first.
+2. Build clean baseline geometry. For isometric work, fix the projection and shared edges first. Wherever one part sits in front of another, work out what a viewer would actually see and remove the rest.
 3. Give every part one of the paint recipes below.
 4. Add the hand-drawn character in the path coordinates.
 5. Validate, and again after every edit. The script is in this skill's directory and needs Python 3.10+:
@@ -44,6 +44,7 @@ Never present output as legally cleared, and do not trace or adapt SimpleDiagram
 - A body's fill and outline are on the same closed drawable: `fill="#ffffff"`, `stroke="#000000"`. No fill-only face under a separate outline.
 - `stroke-width="1"`, round caps and round joins on every stroke, and at least one stroked drawable per file.
 - Faces that share an edge use identical coordinates for it.
+- Draw only what is visible. Never paint a nearer part over a farther one: cut hidden lines and areas out of the geometry.
 - Transparent background. No canvas-sized rectangle.
 - Waviness lives in path coordinates and never changes an edge's average direction or endpoints.
 

@@ -55,6 +55,16 @@ vertical:   (0, height)
 
 A top face `A → B → C → D` is a parallelogram: `D = A + C - B`. Drop every visible corner of a prism by the same height, so bottom edges stay parallel to top edges. Perturb only after this construction is correct.
 
+## Hidden lines
+
+Don't rely on a white fill to hide the geometry beneath it: the user may make the fill transparent or textured. A solid object must look solid with every fill removed.
+
+- For a box, draw only the three faces that face the viewer.
+- Decide the order from back to front. Where a nearer part covers a farther one, the farther part ends at the nearer part's edge: draw its visible region as its own closed shape, not the whole face.
+- Along the cut, reuse the nearer edge's exact coordinates. Split the nearer edge at the points where the cut begins and ends so both shapes share identical pieces.
+- The same holds for flat shapes: a stem stops at the leaf or pot it runs behind.
+- A detail drawn on a surface, such as a window on a wall, hides no lines and may sit on top.
+
 ## Avoid
 
 - One or two large bows along an edge, or perfectly straight CAD lines
@@ -63,6 +73,7 @@ A top face `A → B → C → D` is a parallelogram: `D = A + C - B`. Drop every
 - Double-stroked sketch lines, unless requested
 - Filters or displacement effects
 - Perspective errors passed off as hand-drawn character
+- Lines that the object itself would hide
 - A wavy silhouette around mechanical internal lines
 
 ## Visual check
@@ -74,5 +85,6 @@ Render on a plain light background at the expected placed size, at about 2×, an
 - No edge looks melted, scalloped, or polygonal.
 - Parallel, vertical, circular and isometric relationships hold.
 - Fill and outline meet cleanly at every shared seam.
+- With every fill removed, no line shows that the real object would hide.
 
 If the wobble cannot be seen, increase displacement, not stroke width. If the object looks warped, restore the baseline and reduce displacement, not the number of deviations.

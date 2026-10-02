@@ -372,6 +372,12 @@ class ValidateSvgTests(unittest.TestCase):
             '<g stroke-dasharray="-1 2"/>',
             '<g transform="spin(45)"/>',
             '<g transform="translate(1e999 0)"/>',
+            '<g transform="translate(1 2 3)"/>',
+            '<g transform="rotate(10 5)"/>',
+            '<g transform="matrix(1 0 0 1 0)"/>',
+            '<g transform="translate(1 2) junk"/>',
+            '<g stroke-width="\u0661"/>',
+            '<g transform="translate(\u0661 2)"/>',
             '<g stroke-miterlimit="0"/>',
             '<circle cx="5" cy="5" fill="none" stroke="#000000" data-sd-stroke="stroke-chip" data-sd-fill="keep"/>',
             '<circle r="-1" fill="none" stroke="#000000" data-sd-stroke="stroke-chip" data-sd-fill="keep"/>',
@@ -408,6 +414,35 @@ class ValidateSvgTests(unittest.TestCase):
         for name, source in (("hidden", hidden), ("prefixed", prefixed), ("commented", commented)):
             with self.subTest(case=name):
                 self.assertTrue(validator.validate(self.write(source)).errors)
+
+    def test_malformed_transform_is_rejected_quickly(self) -> None:
+        """A supplied SVG must not be able to stall the validator.
+
+        An earlier pattern backtracked quadratically on a long run of
+        whitespace before a bad character, so a 100 KB attribute took most of
+        a minute. Matching must stay linear, and anything past the app's
+        4,096-byte transform limit is refused without matching at all.
+        """
+        import time
+
+        for padding in (3_000, 200_000):
+            with self.subTest(padding=padding):
+                source = svg(BODY + '<g transform="translate(1 2)' + " " * padding + 'x"/>')
+                started = time.monotonic()
+                report = validator.validate(self.write(source))
+                self.assertLess(time.monotonic() - started, 1.0)
+                self.assertTrue(report.errors)
+
+    def test_nesting_limit_matches_the_app(self) -> None:
+        """SimpleDiagrams allows 64 levels of elements counting the root, and no more."""
+        def nested(groups: int) -> str:
+            return svg("<g>" * groups + BODY + "</g>" * groups)
+
+        # root + 62 groups + the path = 64 levels
+        self.assertEqual(validator.validate(self.write(nested(62))).errors, [])
+        self.assertTrue(
+            any("nesting" in e for e in validator.validate(self.write(nested(63))).errors)
+        )
 
     def test_element_count_limit_matches_the_app(self) -> None:
         """SimpleDiagrams refuses more than 50,000 elements; stay inside it."""

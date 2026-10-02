@@ -99,6 +99,7 @@ A marked file that cannot be compiled falls back to these rules without notice.
 | "…cannot be converted and will be left out" | Filter, mask, pattern, gradient, image, text, marker, or `vector-effect` | Redraw it as paths |
 | **Convert to Editable Shape** is unavailable | Unsupported color syntax such as `hsl()` or most named colors, a non-numeric width or opacity, nested `svg`, CSS beyond class selectors, CDATA, or the text `<script` or `javascript:` anywhere in the file, comments included | Use hex colors and direct geometry |
 | A library shape arrives in unexpected colors | The library's **Initial colors** setting | See Starting colors; this is not an SVG fault |
+| Lines show through a part when the fill is transparent or textured | A nearer part was painted over a farther one | Cut the hidden geometry away; see Hidden lines in the geometry reference |
 | Cracks or thick seams when resized | Adjacent faces have nearly matching edges | Reuse one edge's exact coordinates |
 
 ## Import test

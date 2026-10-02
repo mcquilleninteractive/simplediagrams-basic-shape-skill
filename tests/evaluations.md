@@ -7,7 +7,7 @@ Run each prompt in a fresh conversation with only this skill installed, once per
 Checked on 2 October 2026 against SimpleDiagrams for macOS 5.0.8 (build 31):
 
 - The contract was checked against the app's importer by reading it; no drag-and-drop import was performed.
-- The validator's 28 tests pass, and both bundled SVGs and every recipe in the documentation pass `--strict`.
+- The validator's 30 tests pass, and both bundled SVGs and every recipe in the documentation pass `--strict`.
 - None of the prompts below has been run yet. Add a dated line here for each agent and prompt as it is run, with its result.
 
 ## 1. New organic shape
@@ -20,7 +20,7 @@ Check: an SVG file is delivered; recognizable cactus; subtle waviness on contour
 
 "Make an isometric two-bay server with three side vents, in the same pencil style. Then make the waves half as strong and more frequent without changing the box's corners or angles."
 
-Check: axes at ±30°; equal vertical drops; shared faces reuse exact edge coordinates; vents follow the face axes; the revision halves displacement to about 0.12 and shortens the spacing, with corners and stroke width unchanged.
+Check: axes at ±30°; equal vertical drops; shared faces reuse exact edge coordinates; vents follow the face axes; with fills removed no hidden edge shows; the revision halves displacement to about 0.12 and shortens the spacing, with corners and stroke width unchanged.
 
 ## 3. Matching set and a true hole
 
