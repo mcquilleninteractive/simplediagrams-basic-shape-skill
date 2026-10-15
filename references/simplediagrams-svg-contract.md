@@ -77,9 +77,12 @@ The colors drawn on chip channels are only a preview; conversion discards them.
 ## Authoring subset
 
 - Drawables: `path`, `rect`, `circle`, `ellipse`, `polygon`, `polyline`, `line`. Also `g`, and `title` / `desc` for annotations.
+- Drawing goes in `<svg>` or `<g>`. SimpleDiagrams never draws anything placed inside a drawable, so a drawable holds nothing but an optional `title` or `desc`. Words go only in `title` or `desc`; loose text elsewhere is dropped.
 - Attributes: geometry, `transform`, `fill`, `stroke`, `stroke-width`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `stroke-dasharray`, `stroke-dashoffset`, `fill-rule`, `opacity`, `fill-opacity`, `stroke-opacity`, `id`, and the two markings. SimpleDiagrams leaves out most others, such as `role` or `paint-order`, with a warning.
 - Colors are `none`, `black`, `white`, `#rgb` or `#rrggbb`.
-- Root: SVG namespace, positive `width` and `height`, and a `viewBox` of four finite numbers with positive size. Keep every stroke inside the viewBox.
+- Root: SVG namespace, `width` and `height` of at least 1, and a `viewBox` of four finite numbers with width and height of at least 1. Keep every stroke inside the viewBox.
+- Every number in a size, coordinate, path or transform stays within ±100,000, and stroke widths, miter limits and dash lengths at most 10,000. These are authoring limits, far inside what SimpleDiagrams takes; it refuses a shape whose points end up beyond its own larger limit, as stacked transforms can multiply them.
+- Groups nest at most 64 deep.
 - UTF-8, at most 500,000 bytes.
 
 Not used: `style`, `class`, `defs`, `symbol`, `use`, `clipPath`, `mask`, `filter`, `pattern`, gradients, `image`, `text`, `marker`, nested `svg`, scripts, event handlers, animation, `vector-effect`, and any `href` or `url()` reference. SimpleDiagrams accepts some of these, drops others with a warning, and refuses the conversion for others; direct geometry avoids all three outcomes.

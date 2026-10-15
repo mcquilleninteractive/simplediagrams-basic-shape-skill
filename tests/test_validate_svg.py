@@ -10,6 +10,7 @@ installed SimpleDiagrams application are required.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
@@ -560,6 +561,131 @@ class ValidateSvgTests(unittest.TestCase):
                 self.assertTrue(
                     any("explicit fill AND stroke" in error for error in report.errors)
                 )
+
+    def test_drawing_inside_a_drawn_element_is_refused(self) -> None:
+        """SimpleDiagrams never draws a child of a <path> or <rect>, so a file that relies
+        on one would pass here and import with parts missing."""
+        inner = '<path d="M20 20 L60 20" fill="none" stroke="#000000" data-sd-stroke="keep"/>'
+        for content in (
+            BODY.replace("/>", f">{inner}</path>"),
+            (
+                '<rect x="5" y="5" width="50" height="50" fill="none" stroke="#000000" '
+                f'data-sd-stroke="stroke-chip"><g>{inner}</g></rect>'
+            ),
+        ):
+            with self.subTest(content=content):
+                report = validator.validate(self.write(svg(content)))
+                self.assertTrue(
+                    any("may not contain other elements" in error for error in report.errors),
+                    report.errors,
+                )
+        titled = BODY.replace("/>", "><title>Body</title></path>")
+        self.assertEqual(validator.validate(self.write(svg(titled))).errors, [])
+
+    def test_numbers_beyond_the_authoring_limit_are_refused(self) -> None:
+        """Huge sizes and transforms pass a finite-number check but fail or overflow in
+        SimpleDiagrams; one limit keeps every number far inside what it draws."""
+        limit = validator.MAX_NUMBER
+        for content, attributes in (
+            (BODY, 'width="1e308"'),
+            (f'<g transform="scale({limit * 10})">{BODY}</g>', ""),
+            (BODY.replace("M10 10", f"M{limit + 1} 10"), ""),
+        ):
+            with self.subTest(content=content, attributes=attributes):
+                source = svg(content).replace('width="80"', attributes) if attributes else svg(content)
+                report = validator.validate(self.write(source))
+                self.assertTrue(any("beyond ±100,000" in error for error in report.errors), report.errors)
+        at_limit = f'<g transform="translate({limit} -{limit})">{BODY}</g>'
+        self.assertEqual(validator.validate(self.write(svg(at_limit))).errors, [])
+
+    def test_stroke_width_follows_the_apps_limit(self) -> None:
+        """SimpleDiagrams refuses a stroke wider than 10,000."""
+        for width, passes in (("10000", True), ("10001", False)):
+            with self.subTest(width=width):
+                report = validator.validate(self.write(svg(BODY.replace('stroke-width="0.9"', f'stroke-width="{width}"'))))
+                self.assertEqual(not report.errors, passes, report.errors)
+
+    def test_tiny_sizes_and_long_dashes_are_refused(self) -> None:
+        """SimpleDiagrams refuses a size too small to draw and a dash longer than 10,000."""
+        for source in (
+            svg().replace('width="80"', 'width="1e-300"'),
+            svg().replace('viewBox="0 0 80 80"', 'viewBox="0 0 0.5 80"'),
+            svg(BODY.replace("/>", ' stroke-dasharray="10001"/>')),
+        ):
+            with self.subTest(source=source):
+                self.assertTrue(validator.validate(self.write(source)).errors)
+        dashed = svg(BODY.replace("/>", ' stroke-dasharray="10000 4"/>'))
+        self.assertEqual(validator.validate(self.write(dashed)).errors, [])
+
+    def test_control_codes_in_a_file_name_print_as_escapes(self) -> None:
+        """A file name can carry a terminal command, such as one that sets the clipboard;
+        the report must show it as text instead of sending it."""
+        path = self.write(svg(), "shape\x1b]52;c;SGk=\x07.svg")
+        result = subprocess.run(
+            [sys.executable, str(VALIDATOR_PATH), str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("\x1b", result.stdout)
+        self.assertIn("shape\\u001b]52;c;SGk=\\u0007.svg", result.stdout)
+
+    def test_text_outside_title_and_desc_is_refused(self) -> None:
+        """SimpleDiagrams drops loose text with a warning, so it would never appear."""
+        for content in (f"<g>Loose words{BODY}</g>", f"<g>{BODY} trailing</g>"):
+            with self.subTest(content=content):
+                report = validator.validate(self.write(svg(content)))
+                self.assertTrue(any("is not drawn" in error for error in report.errors), report.errors)
+        spaced = f"<g>\n  {BODY}\n</g>"
+        self.assertEqual(validator.validate(self.write(svg(spaced))).errors, [])
+
+    def test_a_pipe_or_folder_is_refused_without_waiting(self) -> None:
+        """A named pipe with no writer once stalled the run; it and a folder must fail at
+        once with a plain reason, without leaving a file open."""
+        pipe = self.directory / "pipe.svg"
+        os.mkfifo(pipe)
+        folder = self.directory / "folder.svg"
+        folder.mkdir()
+        before = len(os.listdir("/dev/fd"))
+        for path in (pipe, folder):
+            with self.subTest(path=path.name):
+                report = validator.validate(path)
+                self.assertEqual(report.errors, ["not a regular file; give the path of an SVG file"])
+        self.assertEqual(len(os.listdir("/dev/fd")), before)
+
+    def test_deep_nesting_fails_normally_and_later_files_are_still_checked(self) -> None:
+        """A 7 KB file of a thousand nested groups once crashed the pin check and stopped
+        the run; it must fail like any other file, with the files after it still reported."""
+        deep = self.write(svg("<g>" * 1000 + BODY + "</g>" * 1000), "deep.svg")
+        fine = self.write(svg(), "fine.svg")
+        report = validator.validate(deep)
+        self.assertTrue(any("nesting exceeds" in error for error in report.errors), report.errors)
+        result = subprocess.run(
+            [sys.executable, str(VALIDATOR_PATH), str(deep), str(fine)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"FAIL: {deep}", result.stdout)
+        self.assertIn(f"PASS: {fine}", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_an_unexpected_failure_fails_only_that_file(self) -> None:
+        """Should any check ever raise, the run reports that file as failed and goes on."""
+        broken, fine = self.write(svg(), "broken.svg"), self.write(svg(), "fine.svg")
+        real_validate = validator.validate
+
+        def flaky(path: Path) -> validator.Report:
+            if path == broken:
+                raise RuntimeError("simulated")
+            return real_validate(path)
+
+        with mock.patch.object(validator, "validate", flaky):
+            reports = [validator.validate_or_report(path) for path in (broken, fine)]
+        self.assertEqual(reports[0].errors, ["could not be checked (RuntimeError): simulated"])
+        self.assertEqual(reports[1].errors, [])
 
 
 if __name__ == "__main__":

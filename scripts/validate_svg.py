@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import re
+import stat
+import unicodedata
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 
 SVG_NAMESPACE = "http://www.w3.org/2000/svg"
@@ -22,6 +26,17 @@ SVG_NAMESPACE = "http://www.w3.org/2000/svg"
 MAX_SVG_BYTES = 500_000
 MAX_DEPTH = 64
 MAX_ELEMENTS = 50_000
+# Authoring size limit for every number in a size, coordinate, path or transform; a
+# hand-drawn shape needs nothing near it, and it stays far inside what SimpleDiagrams takes.
+MAX_NUMBER = 100_000
+# SimpleDiagrams refuses a stroke width, miter limit or dash length above this.
+MAX_STROKE = 10_000
+# Attributes whose values are numbers or lists of them, all held to MAX_NUMBER.
+NUMERIC_ATTRIBUTES = {
+    "viewBox", "width", "height", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r",
+    "rx", "ry", "d", "points", "transform", "stroke-width", "stroke-miterlimit",
+    "stroke-dasharray", "stroke-dashoffset",
+}  # fmt: skip
 DRAWABLES = {"path", "rect", "circle", "ellipse", "polygon", "polyline", "line"}
 ALLOWED_ELEMENTS = DRAWABLES | {"svg", "g", "title", "desc"}
 MARKING_CARRIERS = DRAWABLES | {"g"}
@@ -121,14 +136,14 @@ def local_name(name: str) -> str:
 
 
 def positive_length(value: str | None) -> bool:
-    """Return whether an SVG length is a positive finite numeric length."""
+    """Return whether an SVG length is a finite numeric length of at least 1."""
     if value is None:
         return False
     match = LENGTH_RE.fullmatch(value.strip())
     if match is None:
         return False
     number = float(match.group(1))
-    return math.isfinite(number) and number > 0
+    return math.isfinite(number) and number >= 1
 
 
 def finite_number(value: str) -> float | None:
@@ -172,8 +187,8 @@ def value_problem(element: str, attribute: str, value: str) -> str | None:
         return None if value.strip() in allowed else f"must be one of {', '.join(sorted(allowed))}"
     if attribute == "stroke-dasharray":
         dashes = None if value.strip() == "none" else number_list(value)
-        usable = value.strip() == "none" or (dashes and all(dash >= 0 for dash in dashes))
-        return None if usable else "must be none or a list of non-negative numbers"
+        usable = value.strip() == "none" or (dashes and all(0 <= dash <= MAX_STROKE for dash in dashes))
+        return None if usable else f"must be none or a list of numbers from 0 to {MAX_STROKE:,}"
     if attribute == "transform":
         if usable_transform(value):
             return None
@@ -185,14 +200,15 @@ def value_problem(element: str, attribute: str, value: str) -> str | None:
         return None if usable else "must be a list of finite x,y pairs"
     number = finite_number(value)
     if attribute == "stroke-width":
-        usable = number is not None and number > 0
-        return None if usable else 'must be a positive number; use stroke="none" for no stroke'
+        usable = number is not None and 0 < number <= MAX_STROKE
+        return None if usable else f'must be a positive number up to {MAX_STROKE:,}; use stroke="none" for no stroke'
     if attribute in OPACITY_ATTRIBUTES:
         return None if number is not None and 0 < number <= 1 else "must be a number above 0 and at most 1"
     if attribute in COORDINATE_ATTRIBUTES:
         return None if number is not None else "must be a finite number"
     if attribute == "stroke-miterlimit":
-        return None if number is not None and number >= 1 else "must be a number of at least 1"
+        usable = number is not None and 1 <= number <= MAX_STROKE
+        return None if usable else f"must be a number from 1 to {MAX_STROKE:,}"
     if attribute == "r" or (attribute in {"rx", "ry"} and element == "ellipse"):
         return None if number is not None and number > 0 else "must be a positive number"
     if attribute in {"rx", "ry"}:
@@ -212,7 +228,7 @@ def parse_view_box(value: str | None) -> tuple[float, float, float, float] | Non
     numbers = tuple(float(part) for part in parts)
     if not all(math.isfinite(number) for number in numbers):
         return None
-    if numbers[2] <= 0 or numbers[3] <= 0:
+    if numbers[2] < 1 or numbers[3] < 1:
         return None
     return numbers  # type: ignore[return-value]
 
@@ -282,6 +298,12 @@ def walk(
         problem = value_problem(name, attribute_name, value)
         if problem:
             report.error(f"{attribute_name} on <{name}> {problem}")
+        if attribute_name in NUMERIC_ATTRIBUTES and any(
+            not abs(float(number.group())) <= MAX_NUMBER for number in SVG_NUMBER_RE.finditer(value)
+        ):
+            report.error(
+                f"{attribute_name} on <{name}> has a number beyond ±{MAX_NUMBER:,}; draw at a smaller scale"
+            )
         if attribute_name == "href" or re.search(r"url\s*\(", value, re.IGNORECASE):
             report.error(f"references are outside the portable subset on <{name}>")
         if ACTIVE_SCHEME_RE.search(value):
@@ -320,6 +342,9 @@ def walk(
         if len(element):
             report.error(f"<{name}> may contain only text")
         return
+    # SimpleDiagrams draws no text outside <title> and <desc>; it drops any with a warning.
+    if (element.text or "").strip() or any((child.tail or "").strip() for child in element):
+        report.error(f"text inside <{name}> is not drawn; put words in <title> or <desc>")
 
     paint_root = any(
         element.get(key) in LINKED_VALUES for key in ("data-sd-fill", "data-sd-stroke")
@@ -336,6 +361,10 @@ def walk(
     fill_marking, stroke_marking = inherited_markings(element, markings)
     if name in DRAWABLES:
         stats["drawables"] += 1
+        # SimpleDiagrams draws only what sits in <svg> or <g>; drawing inside a shape such
+        # as a <path> is never drawn. A <title> or <desc> there is harmless.
+        if any(local_name(child.tag) not in {"title", "desc"} for child in element):
+            report.error(f"<{name}> may not contain other elements; put them beside it in a <g>")
         if fill is None or stroke is None:
             report.error(f"<{name}> must declare or inherit explicit fill AND stroke")
         if name == "path" and element.get("d", "").strip()[:1] not in {"M", "m", ""}:
@@ -372,12 +401,17 @@ def walk(
         )
 
 
-def check_pins(element: ET.Element, report: Report, inside_pin: bool = False) -> None:
+def check_pins(
+    element: ET.Element, report: Report, inside_pin: bool = False, depth: int = 0
+) -> None:
     """A pin sits on a group or drawable, names one of nine spots, and never nests.
 
     Each pinned part has one size and one spot, so a pin inside another would have two.
-    The root cannot be pinned: the whole shape is what the pinned parts sit in.
+    The root cannot be pinned: the whole shape is what the pinned parts sit in. Like
+    `walk`, it stops at the nesting limit, which `walk` reports.
     """
+    if depth >= MAX_DEPTH:
+        return
     name = local_name(element.tag)
     value = element.attrib.get(PIN_ATTRIBUTE)
     if value is not None:
@@ -393,7 +427,7 @@ def check_pins(element: ET.Element, report: Report, inside_pin: bool = False) ->
         if inside_pin:
             report.error(f"{PIN_ATTRIBUTE} on <{name}> is inside another pinned part")
     for child in element:
-        check_pins(child, report, inside_pin or value is not None)
+        check_pins(child, report, inside_pin or value is not None, depth + 1)
 
 
 SVG_NUMBER_RE = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
@@ -409,13 +443,20 @@ def svg_number(text: str | None) -> float | None:
 
 
 def check_outlines(
-    element: ET.Element, report: Report, inside_pin: bool = False, moved: bool = False
+    element: ET.Element,
+    report: Report,
+    inside_pin: bool = False,
+    moved: bool = False,
+    depth: int = 0,
 ) -> None:
     """A hand-drawn outline is an unmoved, unpinned <rect> with round corners.
 
     The app redraws the box from the rect's own numbers at every size, so a transform
     on it or around it, a pin, or corners with different x and y radii would be lost.
+    Like `walk`, it stops at the nesting limit, which `walk` reports.
     """
+    if depth >= MAX_DEPTH:
+        return
     name = local_name(element.tag)
     value = element.attrib.get(OUTLINE_ATTRIBUTE)
     offsets = element.attrib.get(OUTLINE_OFFSETS_ATTRIBUTE)
@@ -445,7 +486,7 @@ def check_outlines(
         if (
             not 1 <= len(words) <= MAXIMUM_OUTLINE_OFFSETS
             or any(n is None or n < 0 for n in numbers)
-            or any(a >= b for a, b in zip(numbers, numbers[1:]))
+            or any(a >= b for a, b in pairwise(numbers))
         ):
             report.error(
                 f"invalid {OUTLINE_OFFSETS_ATTRIBUTE} {offsets!r}; list one to "
@@ -463,17 +504,42 @@ def check_outlines(
                     f"corner radius {radius:g}"
                 )
     for child in element:
-        check_outlines(child, report, inside_pin or pinned, moved)
+        check_outlines(child, report, inside_pin or pinned, moved, depth + 1)
+
+
+def read_limited(path: Path, limit: int) -> bytes:
+    """Reads at most `limit` + 1 bytes of a regular file.
+
+    The file is opened without waiting, where the system allows, so a named pipe or a
+    folder is refused at once instead of stalling the run.
+
+    Raises:
+        OSError: The file cannot be opened or read.
+        ValueError: The path is not a regular file.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("not a regular file")
+        stream = os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+    with stream:
+        return stream.read(limit + 1)
 
 
 def validate(path: Path) -> Report:
     """Validate one SVG and return its report."""
     report = Report(path=path)
     try:
-        with path.open("rb") as stream:
-            payload = stream.read(MAX_SVG_BYTES + 1)
+        payload = read_limited(path, MAX_SVG_BYTES)
     except OSError as error:
         report.error(f"cannot read file: {error}")
+        return report
+    except ValueError:
+        report.error("not a regular file; give the path of an SVG file")
         return report
     if len(payload) > MAX_SVG_BYTES:
         report.error(f"SVG exceeds {MAX_SVG_BYTES:,} bytes; simplify the geometry")
@@ -518,11 +584,11 @@ def validate(path: Path) -> Report:
     if not root.tag.startswith(f"{{{SVG_NAMESPACE}}}"):
         report.error(f"root must declare xmlns={SVG_NAMESPACE!r}")
     if parse_view_box(root.attrib.get("viewBox")) is None:
-        report.error("root requires a finite viewBox with positive width and height")
+        report.error("root requires a finite viewBox with width and height of at least 1")
     if not positive_length(root.attrib.get("width")):
-        report.error("root requires a positive numeric width")
+        report.error("root requires a numeric width of at least 1")
     if not positive_length(root.attrib.get("height")):
-        report.error("root requires a positive numeric height")
+        report.error("root requires a numeric height of at least 1")
 
     stats = {"elements": 0, "drawables": 0, "stroked": 0, "markings": 0}
     walk(root, (None, None), report, stats)
@@ -541,14 +607,36 @@ def validate(path: Path) -> Report:
     return report
 
 
+def validate_or_report(path: Path) -> Report:
+    """Validate one SVG, turning an unexpected failure into that file's error.
+
+    The checks are bounded, so this should never be needed; if one still fails, that file
+    fails with the reason and the files after it are still checked.
+    """
+    try:
+        return validate(path)
+    except Exception as failure:  # noqa: BLE001 - reported as this file's failure
+        report = Report(path=path)
+        report.error(f"could not be checked ({type(failure).__name__}): {failure}")
+        return report
+
+
+def printable(text: str) -> str:
+    """`text` with control characters shown as escapes, so a file name or value cannot
+    send the terminal a command such as one that sets the clipboard."""
+    return "".join(
+        f"\\u{ord(c):04x}" if unicodedata.category(c) in {"Cc", "Cf"} else c for c in text
+    )
+
+
 def print_report(report: Report, strict: bool = False) -> None:
     """Print one human-readable validation report."""
     status = "FAIL" if report.errors or (strict and report.warnings) else "PASS"
-    print(f"{status}: {report.path}")
+    print(printable(f"{status}: {report.path}"))
     for message in report.errors:
-        print(f"  ERROR: {message}")
+        print(printable(f"  ERROR: {message}"))
     for message in report.warnings:
-        print(f"  WARNING: {message}")
+        print(printable(f"  WARNING: {message}"))
 
 
 def main(argv: Iterable[str] | None = None) -> int:
@@ -562,7 +650,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
 
-    reports = [validate(path) for path in arguments.svg]
+    reports = [validate_or_report(path) for path in arguments.svg]
     for report in reports:
         print_report(report, strict=arguments.strict)
     has_errors = any(report.errors for report in reports)

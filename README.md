@@ -14,7 +14,7 @@ In Claude Code, install it as a plugin, which also lets you pick up later versio
 
 ```bash
 claude plugin marketplace add mcquilleninteractive/simplediagrams-basic-shape-skill
-claude plugin install simplediagrams-basic-shape-skill@simplediagrams
+claude plugin install simplediagrams-basic-shape-skill@simplediagrams-shapes
 ```
 
 To install by copying instead, keep the folder name `simplediagrams-basic-shape-skill`. If you download a ZIP from GitHub, remove the branch suffix from the folder name.
@@ -41,7 +41,7 @@ Run these from the skill's folder.
 python3 scripts/validate_svg.py path/to/shape.svg --strict
 ```
 
-The validator needs Python 3.10+ and nothing else. It checks structure, paints and markings; it does not run the import. The real test is in SimpleDiagrams: drag the SVG onto a diagram, choose **Convert to Editable Shape**, then change the fill and line colors.
+The validator needs Python 3.10+ and nothing else. It checks structure, paints and markings; it does not run the import. The skill's scripts send nothing anywhere: they make no network requests, and the AI service running the skill handles your files under its own policies. The real test is in SimpleDiagrams: drag the SVG onto a diagram, choose **Convert to Editable Shape**, then change the fill and line colors.
 
 To run the validator's own tests:
 

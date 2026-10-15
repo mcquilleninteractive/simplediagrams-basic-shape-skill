@@ -7,7 +7,7 @@ Run each prompt in a fresh conversation with only this skill installed, once per
 Checked on 2 October 2026 against SimpleDiagrams for macOS 5.0.8 (build 31):
 
 - The contract was checked against the app's importer by reading it; no drag-and-drop import was performed.
-- The validator's 30 tests pass, and both bundled SVGs and every recipe in the documentation pass `--strict`.
+- The validator's tests pass (41 on 15 October 2026), and both bundled SVGs and every recipe in the documentation pass `--strict`.
 - None of the prompts below has been run yet. Add a dated line here for each agent and prompt as it is run, with its result.
 
 ## 1. New organic shape
