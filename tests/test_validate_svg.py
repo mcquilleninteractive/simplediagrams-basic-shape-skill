@@ -471,6 +471,61 @@ class ValidateSvgTests(unittest.TestCase):
                     report.errors,
                 )
 
+    def test_pinned_parts_are_accepted_where_the_app_reads_them(self) -> None:
+        """A group or drawable may be pinned to one of nine spots, so a task's picture
+        keeps its size when the task is resized; anything the app would refuse fails."""
+        pinned = (
+            '<g data-sd-pin="top-left">'
+            '<path data-sd-fill="keep" data-sd-stroke="stroke-chip" fill="none" '
+            'stroke="#000000" stroke-width="1" d="M12 12 L20 20"/></g>'
+        )
+        report = validator.validate(self.write(svg(BODY + pinned)))
+        self.assertEqual(report.errors, [])
+        self.assertEqual(report.warnings, [], "Pins must pass the strict check BPMN uses.")
+
+        refused = {
+            "unknown spot": BODY.replace("<path ", '<path data-sd-pin="middle" '),
+            "nested": f'<g data-sd-pin="top">{pinned}</g>' + BODY,
+            "not a carrier": BODY + '<title data-sd-pin="top">t</title>',
+        }
+        for case, body in refused.items():
+            with self.subTest(case=case):
+                errors = validator.validate(self.write(svg(body))).errors
+                self.assertTrue(any("data-sd-pin" in error for error in errors), errors)
+        root = validator.validate(self.write(svg(BODY, 'data-sd-pin="center"'))).errors
+        self.assertTrue(any("root" in error for error in root), root)
+
+    def test_hand_drawn_outlines_are_accepted_where_the_app_reads_them(self) -> None:
+        """A rect may be a box the app draws by hand at every size, so a BPMN task keeps
+        its corners and margin when resized; anything the app would refuse fails."""
+        outline = (
+            '<rect data-sd-fill="fill-chip" data-sd-stroke="stroke-chip" fill="#ffffff" '
+            'stroke="#000000" stroke-width="1" x="10" y="10" width="60" height="40" rx="6" '
+            'data-sd-outline="hand-drawn" data-sd-outline-offsets="0 2.4"/>'
+        )
+        report = validator.validate(self.write(svg(outline)))
+        self.assertEqual(report.errors, [])
+        self.assertEqual(report.warnings, [], "Outlines must pass the strict check BPMN uses.")
+        # The same numbers spelt differently are the same corners and the same offsets.
+        same = outline.replace('rx="6"', 'rx="6" ry="6.0"').replace('"0 2.4"', '"0,\t2.4"')
+        self.assertEqual(validator.validate(self.write(svg(same))).errors, [])
+
+        refused = {
+            "not a rect": BODY.replace("<path ", '<path data-sd-outline="hand-drawn" '),
+            "unknown kind": outline.replace("hand-drawn", "sketchy"),
+            "pinned": f'<g data-sd-pin="top">{outline}</g>',
+            "moved": f'<g transform="translate(2 0)">{outline}</g>',
+            "uneven corners": outline.replace('rx="6"', 'rx="6" ry="3"'),
+            "offsets out of order": outline.replace('"0 2.4"', '"3 1"'),
+            "offsets alone": outline.replace('data-sd-outline="hand-drawn" ', ""),
+            "offset beyond the corner radius": outline.replace('"0 2.4"', '"0 7"'),
+            "an offset Python reads but the app does not": outline.replace('"0 2.4"', '"0 inf"'),
+        }
+        for case, body in refused.items():
+            with self.subTest(case=case):
+                errors = validator.validate(self.write(svg(body))).errors
+                self.assertTrue(any("data-sd-outline" in error for error in errors), errors)
+
     def test_invalid_unknown_and_qualified_markings_fail(self) -> None:
         """Only canonical unqualified metadata may describe paint channels."""
         cases = (

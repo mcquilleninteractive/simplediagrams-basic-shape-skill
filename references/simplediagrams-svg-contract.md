@@ -25,6 +25,18 @@ If a file has any `data-sd-fill` or `data-sd-stroke` attribute, nothing is infer
 
 Conversion produces native paths. SVG groups, IDs and markup are not preserved, so keep the SVG for revisions.
 
+## Pinned parts
+
+A part wrapped in `<g data-sd-pin="top-left">` keeps the size it was drawn at, and its distance from that corner, when the shape is resized; the rest of the shape stretches. The nine spots are `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom` and `bottom-right`. Use it for a small picture or mark that should not stretch, such as the picture in a BPMN task's corner. Draw the part where it belongs at the shape's default size.
+
+Pins work only in a library shipped inside the SimpleDiagrams app. The tool that builds a downloadable library refuses them, and converting the SVG in the app drops the pin, says so on the import sheet, and stretches the part. Pins may not nest or sit on the root `<svg>`. The validator checks all of this.
+
+## Hand-drawn outlines
+
+A `<rect>` marked `data-sd-outline="hand-drawn"` is a box the app draws by hand at every size. Its corners keep their radius, its distance from each edge of the frame stays as drawn, and its wobble stays the same however large the shape is made; only its straight sides get longer. Use it for a box whose picture or mark is pinned inside it, such as a BPMN task's body, so the picture never ends up outside a swollen corner. `data-sd-outline-offsets="0 2.4"` draws the same box again that far inside, for a heavy border filled between two lines (with `fill-rule="evenodd"`), and `"3.4"` alone draws only an inner line, for a double border. Paint the rect as usual.
+
+The rect must have round corners (`rx`, or `rx` and `ry` equal), no transform on it or around it, and no pin. Like pins, outlines work only in a library shipped inside the SimpleDiagrams app; elsewhere the box is drawn as a plain rect that stretches. The validator checks all of this.
+
 ## Paint roots
 
 An element with its **own** chip marking on either channel discards both inherited paints: a missing fill becomes black and a missing stroke becomes `none`. Width, opacity, dash and transforms still inherit. Inherited markings and an own `keep` do not do this.

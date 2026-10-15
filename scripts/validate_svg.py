@@ -49,6 +49,22 @@ REQUIRED_GEOMETRY = {
     "polyline": ("points",),
 }
 MARKING_VALUES = {"fill-chip", "stroke-chip", "keep"}
+# A pinned part keeps its drawn size and its distance from one of these spots of the
+# frame when the shape is resized (SimpleDiagrams desktop ADR 0042). Only a library
+# shipped inside the app reads it so far; the download packager refuses it by name.
+PIN_ATTRIBUTE = "data-sd-pin"
+PIN_VALUES = {
+    "top-left", "top", "top-right", "left", "center", "right",
+    "bottom-left", "bottom", "bottom-right",
+}  # fmt: skip
+# A <rect> marked as a hand-drawn outline is a box the app draws by hand at every size,
+# keeping its corners, its distance from the frame and its wobble at their drawn size
+# (SimpleDiagrams desktop ADR 0043). Offsets list the distances inwards at which it is
+# drawn, for a double or heavy border. Shipped libraries only, like pins.
+OUTLINE_ATTRIBUTE = "data-sd-outline"
+OUTLINE_VALUES = {"hand-drawn"}
+OUTLINE_OFFSETS_ATTRIBUTE = "data-sd-outline-offsets"
+MAXIMUM_OUTLINE_OFFSETS = 4
 LINKED_VALUES = {"fill-chip", "stroke-chip"}
 FORBIDDEN_ATTRIBUTES = {
     "vector-effect",
@@ -273,6 +289,9 @@ def walk(
         if attribute_name.startswith("data-sd-") and attribute_name not in {
             "data-sd-fill",
             "data-sd-stroke",
+            PIN_ATTRIBUTE,
+            OUTLINE_ATTRIBUTE,
+            OUTLINE_OFFSETS_ATTRIBUTE,
         }:
             report.error(f"unknown SimpleDiagrams marking {attribute_name!r}")
         if attribute_name.startswith("data-sd-") and attribute != attribute_name:
@@ -353,6 +372,100 @@ def walk(
         )
 
 
+def check_pins(element: ET.Element, report: Report, inside_pin: bool = False) -> None:
+    """A pin sits on a group or drawable, names one of nine spots, and never nests.
+
+    Each pinned part has one size and one spot, so a pin inside another would have two.
+    The root cannot be pinned: the whole shape is what the pinned parts sit in.
+    """
+    name = local_name(element.tag)
+    value = element.attrib.get(PIN_ATTRIBUTE)
+    if value is not None:
+        if name == "svg":
+            report.error(f"{PIN_ATTRIBUTE} is not allowed on the root <svg>")
+        elif name not in MARKING_CARRIERS:
+            report.error(f"{PIN_ATTRIBUTE} is not allowed on <{name}>")
+        if value not in PIN_VALUES:
+            report.error(
+                f"invalid {PIN_ATTRIBUTE} value {value!r} on <{name}>; use one of "
+                + ", ".join(sorted(PIN_VALUES))
+            )
+        if inside_pin:
+            report.error(f"{PIN_ATTRIBUTE} on <{name}> is inside another pinned part")
+    for child in element:
+        check_pins(child, report, inside_pin or value is not None)
+
+
+SVG_NUMBER_RE = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
+
+
+def svg_number(text: str | None) -> float | None:
+    """A finite number spelt as SVG spells one, or None. Python's float() would also take
+    'inf', 'nan' and '1_0', which the app refuses."""
+    if text is None or not SVG_NUMBER_RE.fullmatch(text.strip()):
+        return None
+    number = float(text.strip())
+    return number if math.isfinite(number) else None
+
+
+def check_outlines(
+    element: ET.Element, report: Report, inside_pin: bool = False, moved: bool = False
+) -> None:
+    """A hand-drawn outline is an unmoved, unpinned <rect> with round corners.
+
+    The app redraws the box from the rect's own numbers at every size, so a transform
+    on it or around it, a pin, or corners with different x and y radii would be lost.
+    """
+    name = local_name(element.tag)
+    value = element.attrib.get(OUTLINE_ATTRIBUTE)
+    offsets = element.attrib.get(OUTLINE_OFFSETS_ATTRIBUTE)
+    pinned = element.attrib.get(PIN_ATTRIBUTE) is not None
+    moved = moved or element.attrib.get("transform") is not None
+    if value is not None:
+        if name != "rect":
+            report.error(f"{OUTLINE_ATTRIBUTE} is allowed only on <rect>, not <{name}>")
+        if value not in OUTLINE_VALUES:
+            report.error(
+                f"invalid {OUTLINE_ATTRIBUTE} value {value!r}; use "
+                + ", ".join(sorted(OUTLINE_VALUES))
+            )
+        if inside_pin or pinned:
+            report.error(f"{OUTLINE_ATTRIBUTE} cannot be pinned or inside a pinned part")
+        if moved:
+            report.error(f"{OUTLINE_ATTRIBUTE} cannot be moved by a transform")
+        rx, ry = svg_number(element.attrib.get("rx")), svg_number(element.attrib.get("ry"))
+        if rx is not None and ry is not None and rx != ry:
+            report.error(f"{OUTLINE_ATTRIBUTE} needs round corners: rx and ry must agree")
+    if offsets is not None:
+        if value is None:
+            report.error(f"{OUTLINE_OFFSETS_ATTRIBUTE} needs {OUTLINE_ATTRIBUTE} on the same <rect>")
+        # Read as the app reads it: an SVG list of numbers, separated by spaces or commas.
+        words = [word for word in re.split(r"[\s,]+", offsets.strip()) if word]
+        numbers = [svg_number(word) for word in words]
+        if (
+            not 1 <= len(words) <= MAXIMUM_OUTLINE_OFFSETS
+            or any(n is None or n < 0 for n in numbers)
+            or any(a >= b for a, b in zip(numbers, numbers[1:]))
+        ):
+            report.error(
+                f"invalid {OUTLINE_OFFSETS_ATTRIBUTE} {offsets!r}; list one to "
+                f"{MAXIMUM_OUTLINE_OFFSETS} increasing distances, none negative"
+            )
+        else:
+            # A copy further in than the corner radius would turn its corners inside out.
+            radius = svg_number(element.attrib.get("rx")) or svg_number(element.attrib.get("ry")) or 0
+            width = svg_number(element.attrib.get("width")) or 0
+            height = svg_number(element.attrib.get("height")) or 0
+            radius = min(radius, width / 2, height / 2)
+            if numbers and numbers[-1] > radius:
+                report.error(
+                    f"{OUTLINE_OFFSETS_ATTRIBUTE} {offsets!r} reaches further in than the "
+                    f"corner radius {radius:g}"
+                )
+    for child in element:
+        check_outlines(child, report, inside_pin or pinned, moved)
+
+
 def validate(path: Path) -> Report:
     """Validate one SVG and return its report."""
     report = Report(path=path)
@@ -413,6 +526,8 @@ def validate(path: Path) -> Report:
 
     stats = {"elements": 0, "drawables": 0, "stroked": 0, "markings": 0}
     walk(root, (None, None), report, stats)
+    check_pins(root, report)
+    check_outlines(root, report)
     if stats["elements"] > MAX_ELEMENTS:
         report.error(f"SVG exceeds {MAX_ELEMENTS:,} elements; simplify the drawing")
     if stats["drawables"] == 0:
